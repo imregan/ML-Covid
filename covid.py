@@ -42,20 +42,35 @@ def owid(country="United States"):
     for col in exp_data:
         logstring = "log_" + str(col)
         m = df[col].values.astype('float64')
-        print(m.min(), m.max())
         df[logstring] = np.log10(m, out=np.zeros_like(m), where=(m>0))
         
     if country is not None:
         df = df[df["location"] == country]
     
-    print(df.head())
-
     return df
 
-df = owid()
-print(df.head())
+# copy over specified columns from days back
+def owid_recurrent(df, columns, days_back):
+    # initialize columns
+    for col in columns:
+        newcol = col + "-" + str(days_back)
+        df[newcol] = np.zeros_like(df[col])
 
-X = df[['total_cases', 'total_tests', 'new_tests']]
+    # fill recurrent info for each country
+    for country in df.location.unique():
+        idxs = df.index[df['location'] == country].tolist()
+        start, stop = idxs[0], idxs[-1]
+        for col in columns:
+            newcol = col + "-" + str(days_back)   # maybe rename this later
+            for i in range(start+days_back, stop+1):
+                df.loc[i, newcol] = df.loc[i-days_back, col]
+
+
+# sanity check with recurrent helper
+df = owid()
+owid_recurrent(df, ['total_cases'], 7)
+
+X = df[['total_cases','total_cases-7', 'total_tests', 'new_tests']]
 y = df[['new_cases']]
 
 lr = sm.OLS(y,X).fit()
