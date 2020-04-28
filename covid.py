@@ -18,7 +18,7 @@ def johns_hopkins_global_timeseries(country='US'):
     set_column_datetimes(df)
 
     # messy setup
-    df = df.drop(['Province/State','Lat', 'Long'], axis=1).T
+    df = df.drop(['Province/State', 'Lat', 'Long'], axis=1).T
     df = df.rename(columns=df.iloc[0]).drop(df.index[0])
     df = df.reset_index().rename(columns={'index':'date'})
     df = df[[country, 'date']]
@@ -58,5 +58,5 @@ print(df.head())
 X = df[['total_cases', 'total_tests', 'new_tests']]
 y = df[['new_cases']]
 
-lr = sm.OLS(y,X).fit()
+lr = sm.OLS(y, X).fit()
 print(lr.summary())
