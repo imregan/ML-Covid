@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import statsmodels.api as sm
 from sklearn.linear_model import LinearRegression
 
+import glob
 import datetime
 
 from preprocessing import set_column_datetimes
@@ -31,10 +32,19 @@ def johns_hopkins_global_timeseries(country='US'):
     print(f"Case data for country: {country}")
     return df
 
+def johns_hopkins_us_daily_reports():
+    files = glob.glob("data/*.csv")
+    li = []
+    for filename in files:
+        df = pd.read_csv(filename, index_col=None, header=0)
+        li.append(df)
+
+    frame = pd.concat(li, axis=0, ignore_index=True)
+    return frame
 
 # parsing data from our world in data
 # much nicer formatting by default
-def owid(country="United States"):
+def owid(country=None):
     df = pd.read_csv("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/owid-covid-data.csv").fillna(0)
     df.drop(["iso_code"], axis=1, inplace=True)
     
@@ -66,12 +76,6 @@ def owid_recurrent(df, columns, days_back):
                 df.loc[i, newcol] = df.loc[i-days_back, col]
 
 
-# sanity check with recurrent helper
-df = owid()
-owid_recurrent(df, ['total_cases'], 7)
-
-X = df[['total_cases','total_cases-7', 'total_tests', 'new_tests']]
-y = df[['new_cases']]
-
-lr = sm.OLS(y,X).fit()
-print(lr.summary())
+# state by state compilation
+df = johns_hopkins_us_daily_reports()
+print(df)
