@@ -1,2 +1,5 @@
 # python
 __pycache__/
+
+# csv file too big
+covid_enriched.csv

@@ -1,77 +1,94 @@
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt 
-
-import statsmodels.api as sm
-from sklearn.linear_model import LinearRegression
-
+import matplotlib.pyplot as plt
+import glob
 import datetime
 
-from preprocessing import set_column_datetimes
+from sklearn.feature_selection import RFE, SelectKBest, f_regression
+from sklearn.model_selection import KFold, cross_val_predict
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.metrics import r2_score
+import statsmodels.api as sm  # mostly for p values
 
-# Quick try at johns hopkins data parsing global time series data for specific country
-# kinda messy
-# returns dataframe with dates, cases, and log cases of specific country
-def johns_hopkins_global_timeseries(country='US'):
-    # read data and fix datetime format
-    df = pd.read_csv('https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv')
-    set_column_datetimes(df)
+# Alternative option to NY enriched
+def johns_hopkins_us_daily_reports():
+    files = glob.glob("data/csse_daily_reports*.csv")
+    li = []
+    for filename in files:
+        df = pd.read_csv(filename, index_col=None, header=0)
+        li.append(df)
 
-    # messy setup
-    df = df.drop(['Province/State', 'Lat', 'Long'], axis=1).T
-    df = df.rename(columns=df.iloc[0]).drop(df.index[0])
-    df = df.reset_index().rename(columns={'index':'date'})
-    df = df[[country, 'date']]
-    df = df.rename(columns={country:'cases'})
+    frame = pd.concat(li, axis=0, ignore_index=True)
+    frame.drop(['Lat', 'Long_', 'ISO3', 'UID', 'FIPS',
+                'Country_Region'], axis=1, inplace=True)
+    return frame
 
-    # add log cases
-    m = df['cases'].values.astype('float64')
-    df['log_cases'] = np.log10(m, out=np.zeros_like(m), where=(m!=0))
 
-    print(f"Case data for country: {country}")
+# join datasets on covid, demographics, and population
+def combine_datasets(write_csv=False):
+    # put together csv files5
+    covid = pd.read_csv("enricheddata/covid19_us_county.csv")
+    demo = pd.read_csv("enricheddata/us_county_demographics.csv")
+    demo['county'] = demo['county'].apply(lambda x: x.rsplit(' ', 1)[0])  # remove 'County' from string for join
+    pop = pd.read_csv("enricheddata/us_county_pop_and_shps.csv")
+    
+    # very fun
+    df = pd.merge(covid, demo, how='left', left_on=['state_fips', 'county_fips', 'state', 'county'], right_on=['state_fips', 'county_fips', 'state', 'county'])
+    df = pd.merge(df, pop, how='left', left_on=['state', 'county', 'fips'], right_on=['state', 'county', 'fips'])
+    
+    df.reset_index(drop=True, inplace=True)  # get rid of index column
+    df.dropna(inplace=True)
+
+    if write_csv:
+        df.to_csv("covid_enriched.csv")
+
     return df
 
-
-# parsing data from our world in data
-# much nicer formatting by default
-def owid(country="United States"):
-    df = pd.read_csv("https://raw.githubusercontent.com/owid/covid-19-data/master/public/data/owid-covid-data.csv").fillna(0)
-    df.drop(["iso_code"], axis=1, inplace=True)
-    
-    exp_data = ["total_cases", "new_cases"]  # stuff we want to map log of instead
-    for col in exp_data:
-        logstring = "log_" + str(col)
-        m = df[col].values.astype('float64')
-        df[logstring] = np.log10(m, out=np.zeros_like(m), where=(m>0))
-        
-    if country is not None:
-        df = df[df["location"] == country]
-    
-    return df
-
-# copy over specified columns from days back
-def owid_recurrent(df, columns, days_back):
+# Note that 'colnames' is a list of columns that we wish
+# to add as a variable, with values from 'days_back' days
+def add_recurrent_cols(df, colnames, days_back):
+    # add recurrent variables
     # initialize columns
-    for col in columns:
+    for col in colnames:
         newcol = col + "-" + str(days_back)
         df[newcol] = np.zeros_like(df[col])
 
-    # fill recurrent info for each country
-    for country in df.location.unique():
-        idxs = df.index[df['location'] == country].tolist()
-        start, stop = idxs[0], idxs[-1]
-        for col in columns:
-            newcol = col + "-" + str(days_back)   # maybe rename this later
-            for i in range(start+days_back, stop+1):
-                df.loc[i, newcol] = df.loc[i-days_back, col]
+    # fill in recurrent info by county
+    for county in df.county_fips.unique():
+        idxs = df.index[df['county_fips'] == county].tolist()
 
+        if len(idxs) < days_back:  # cant look back if not enough entries for county
+            break
 
-# sanity check with recurrent helper
-df = owid()
-owid_recurrent(df, ['total_cases'], 7)
+        # this actually works now I think
+        for i in range(days_back, len(idxs)):
+            for col in colnames:
+                newcol = col + "-" + str(days_back)
+                pastval = df.loc[idxs[i-1], col]
+                df.loc[idxs[i], newcol] = pastval
 
-X = df[['total_cases','total_cases-7', 'total_tests', 'new_tests']]
-y = df[['new_cases']]
+    return df
 
-lr = sm.OLS(y, X).fit()
+# Trying stuff out with NY data
+df = combine_datasets(write_csv=False)
+NY = df[df['state'] == 'New York']
+NY = NY[['cases', 'county_fips', 'new_day_cases_per_capita_100k', 'pop_per_sq_mile_2010', 'AGE_15TO24','AGE_25TO34','AGE_35TO44','AGE_45TO54','AGE_55TO64','AGE_65TO74','AGE_75TO84','AGE_84PLUS']]
+for i in range(1, 10):
+    NY = add_recurrent_cols(NY, ['cases', 'new_day_cases_per_capita_100k'], i).dropna()
+recurr_params = [[f'cases-{x}', f'new_day_cases_per_capita_100k-{x}'] for x in range(1,10)]
+params = ['new_day_cases_per_capita_100k'] + [item for sublist in recurr_params for item in sublist]
+
+# set up response/predictors
+X = NY.drop(['new_day_cases_per_capita_100k', 'county_fips', 'cases'], axis=1)
+y = NY[['new_day_cases_per_capita_100k']]
+
+# try logistic regression on all
+lr = sm.OLS(y, sm.add_constant(X)).fit()
 print(lr.summary())
+
+# try feature selection + boosting boosting
+boost = GradientBoostingRegressor()
+selector = RFE(boost).fit(X,y)
+y_pred = cross_val_predict(selector, X, y, cv=10, n_jobs=-1)
+r2 = r2_score(y, y_pred)
+print(f"Boosting r2 score: {r2}")
