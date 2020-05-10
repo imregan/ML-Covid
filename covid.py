@@ -4,11 +4,16 @@ import matplotlib.pyplot as plt
 import glob
 import datetime
 
-from sklearn.feature_selection import RFE, SelectKBest, f_regression
-from sklearn.model_selection import KFold, cross_val_predict
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.metrics import r2_score
+from sklearn.linear_model import LinearRegression, Lasso, ElasticNet
+from sklearn.feature_selection import RFE, RFECV, SelectKBest, f_regression, SelectFromModel
+from sklearn.model_selection import KFold, cross_val_predict, GridSearchCV
+from sklearn.decomposition import PCA
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor, ExtraTreesRegressor
+from sklearn.svm import SVR
+from sklearn.metrics import r2_score, mean_absolute_error
+from scipy.interpolate import CubicSpline
 import statsmodels.api as sm  # mostly for p values
+
 
 # Alternative option to NY enriched
 def johns_hopkins_us_daily_reports():
@@ -29,13 +34,16 @@ def combine_datasets(write_csv=False):
     # put together csv files5
     covid = pd.read_csv("enricheddata/covid19_us_county.csv")
     demo = pd.read_csv("enricheddata/us_county_demographics.csv")
-    demo['county'] = demo['county'].apply(lambda x: x.rsplit(' ', 1)[0])  # remove 'County' from string for join
+    demo['county'] = demo['county'].apply(lambda x: x.rsplit(
+        ' ', 1)[0])  # remove 'County' from string for join
     pop = pd.read_csv("enricheddata/us_county_pop_and_shps.csv")
-    
+
     # very fun
-    df = pd.merge(covid, demo, how='left', left_on=['state_fips', 'county_fips', 'state', 'county'], right_on=['state_fips', 'county_fips', 'state', 'county'])
-    df = pd.merge(df, pop, how='left', left_on=['state', 'county', 'fips'], right_on=['state', 'county', 'fips'])
-    
+    df = pd.merge(covid, demo, how='left', left_on=['state_fips', 'county_fips', 'state', 'county'], right_on=[
+                  'state_fips', 'county_fips', 'state', 'county'])
+    df = pd.merge(df, pop, how='left', left_on=[
+                  'state', 'county', 'fips'], right_on=['state', 'county', 'fips'])
+
     df.reset_index(drop=True, inplace=True)  # get rid of index column
     df.dropna(inplace=True)
 
@@ -43,6 +51,7 @@ def combine_datasets(write_csv=False):
         df.to_csv("covid_enriched.csv")
 
     return df
+
 
 # Note that 'colnames' is a list of columns that we wish
 # to add as a variable, with values from 'days_back' days
@@ -69,26 +78,82 @@ def add_recurrent_cols(df, colnames, days_back):
 
     return df
 
-# Trying stuff out with NY data
-df = combine_datasets(write_csv=False)
-NY = df[df['state'] == 'New York']
-NY = NY[['cases', 'county_fips', 'new_day_cases_per_capita_100k', 'pop_per_sq_mile_2010', 'AGE_15TO24','AGE_25TO34','AGE_35TO44','AGE_45TO54','AGE_55TO64','AGE_65TO74','AGE_75TO84','AGE_84PLUS']]
-for i in range(1, 10):
-    NY = add_recurrent_cols(NY, ['cases', 'new_day_cases_per_capita_100k'], i).dropna()
-recurr_params = [[f'cases-{x}', f'new_day_cases_per_capita_100k-{x}'] for x in range(1,10)]
-params = ['new_day_cases_per_capita_100k'] + [item for sublist in recurr_params for item in sublist]
 
-# set up response/predictors
-X = NY.drop(['new_day_cases_per_capita_100k', 'county_fips', 'cases'], axis=1)
-y = NY[['new_day_cases_per_capita_100k']]
+# plot predictions for models below
+def plot_prediction(X, y_test, y_pred, title):
+    plt.title(title)
+    plt.xlabel("Day")
+    plt.ylabel("Cases")
+    days = [i for i in range(X.shape[0])]
+    plt.scatter(days, np.exp(y_test))
+    plt.plot(days, np.exp(y_pred), color='red')
+    plt.show()
+
+
+# Ttying some simple models with data from one county
+df = combine_datasets(write_csv=False)
+print(df.county.mode, df.county_fips.mode)  # try county with most data points
+X = df[df['county'] == 'Snohomish'].sort_values(by='date')  # seattle county
+
+# filter parameters
+X = X[['cases', 'cases_per_capita_100k', 'county_fips', 'new_day_cases_per_capita_100k', 'pop_per_sq_mile_2010', 'AGE_15TO24',
+       'AGE_25TO34', 'AGE_35TO44', 'AGE_45TO54', 'AGE_55TO64', 'AGE_65TO74', 'AGE_75TO84', 'AGE_84PLUS']]
+# log scale cases
+X[['cases']] = np.log(X[['cases']])
+
+# set up recurrent structure
+for i in range(1, 10):
+    X = add_recurrent_cols(
+        X, ['cases'], i).dropna()
+recurr_params = [
+    [f'cases-{x}'] for x in range(3, 8)]
+params = ['pop_per_sq_mile_2010', 'AGE_15TO24',
+          'AGE_25TO34', 'AGE_35TO44', 'AGE_45TO54', 'AGE_55TO64', 'AGE_65TO74', 'AGE_75TO84', 'AGE_84PLUS'] + \
+    [item for sublist in recurr_params for item in sublist]
+
+# sanity check
+map(lambda s: s.rstrip(), params)
+
+# set up response/predictors (testing by removing last 10 days of data)
+X_train = X[params].drop(X[params].tail(10).index)
+X_test = X[params]
+y_train = X[['cases']].drop(X[params].tail(10).index).values.ravel()
+y_test = X[['cases']].values.ravel()
 
 # try logistic regression on all
-lr = sm.OLS(y, sm.add_constant(X)).fit()
-print(lr.summary())
+lr = sm.OLS(y_train, sm.add_constant(X_train)).fit()
+y_pred = lr.predict(sm.add_constant(X_test))
+error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
+print(f"Linear error: {error}")
 
-# try feature selection + boosting boosting
-boost = GradientBoostingRegressor()
-selector = RFE(boost).fit(X,y)
-y_pred = cross_val_predict(selector, X, y, cv=10, n_jobs=-1)
-r2 = r2_score(y, y_pred)
-print(f"Boosting r2 score: {r2}")
+# plot LR
+plot_prediction(X, y_test, y_pred, "Linear Regression")
+
+# lasso
+lasso = Lasso(alpha=0.1).fit(X_train, y_train)
+y_pred = lasso.predict(X_test)
+error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
+print(f"LASSO error: {error}")
+
+# plot lasso
+plot_prediction(X, y_test, y_pred, "Lasso Regression")
+
+# elastic net
+en = ElasticNet(alpha=0.1, random_state=0).fit(X_train, y_train)
+y_pred = en.predict(X_test.values)
+error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
+print(f"Elastic net error: {error}")
+
+# plot elastic net
+plot_prediction(X, y_test, y_pred, "Elastic Net Regression")
+
+# random forests -- strange end behavior -- overfitting?
+forest = RandomForestRegressor(
+    n_estimators=25, random_state=0, n_jobs=-1, max_features='sqrt').fit(X_train, y_train)
+y_pred = forest.predict(X_test)
+error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
+print(f"Random forest error: {error}")
+
+# plot forests
+plot_prediction(X, y_test, y_pred, "Random Forest Regression")
+
