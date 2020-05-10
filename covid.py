@@ -73,7 +73,7 @@ def add_recurrent_cols(df, colnames, days_back):
         for i in range(days_back, len(idxs)):
             for col in colnames:
                 newcol = col + "-" + str(days_back)
-                pastval = df.loc[idxs[i-1], col]
+                pastval = df.loc[idxs[i-days_back], col]
                 df.loc[idxs[i], newcol] = pastval
 
     return df
@@ -120,17 +120,19 @@ X_test = X[params]
 y_train = X[['cases']].drop(X[params].tail(10).index).values.ravel()
 y_test = X[['cases']].values.ravel()
 
-# try logistic regression on all
+# try linear regression on all
 lr = sm.OLS(y_train, sm.add_constant(X_train)).fit()
 y_pred = lr.predict(sm.add_constant(X_test))
 error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
 print(f"Linear error: {error}")
 
+print(lr.summary())
+
 # plot LR
 plot_prediction(X, y_test, y_pred, "Linear Regression")
 
 # lasso
-lasso = Lasso(alpha=0.1).fit(X_train, y_train)
+lasso = Lasso(alpha=1).fit(X_train, y_train)
 y_pred = lasso.predict(X_test)
 error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
 print(f"LASSO error: {error}")
@@ -139,7 +141,7 @@ print(f"LASSO error: {error}")
 plot_prediction(X, y_test, y_pred, "Lasso Regression")
 
 # elastic net
-en = ElasticNet(alpha=0.1, random_state=0).fit(X_train, y_train)
+en = ElasticNet(alpha=1, random_state=0).fit(X_train, y_train)
 y_pred = en.predict(X_test.values)
 error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
 print(f"Elastic net error: {error}")
@@ -149,7 +151,7 @@ plot_prediction(X, y_test, y_pred, "Elastic Net Regression")
 
 # random forests -- strange end behavior -- overfitting?
 forest = RandomForestRegressor(
-    n_estimators=25, random_state=0, n_jobs=-1, max_features='sqrt').fit(X_train, y_train)
+    n_estimators=50, random_state=0, n_jobs=-1, max_features='sqrt').fit(X_train, y_train)
 y_pred = forest.predict(X_test)
 error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
 print(f"Random forest error: {error}")
@@ -157,3 +159,16 @@ print(f"Random forest error: {error}")
 # plot forests
 plot_prediction(X, y_test, y_pred, "Random Forest Regression")
 
+# feature selection with LASSO  # TODO finish
+# sfm = SelectFromModel(Lasso(alpha=1), threshold=0.2)
+# sfm.fit(X_train, y_train)
+# n_features = sfm.transform(X_train).shape[1]
+# print(X_train)
+
+# while n_features > 4:
+#     sfm.threshold += 0.1
+#     X_transform = sfm.transform(X_train)
+#     n_features = X_transform.shape[1]
+#     print(X_transform)
+
+# print(X_transform)
