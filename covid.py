@@ -104,6 +104,7 @@ def plot_prediction(X, y_test, y_pred, title):
 # set up testing for state for training, county for testing
 def state_testing(df, state_str, county_str, response_var='cases', days_back_range=[3, 4, 5, 6, 7]):
     state = df[df['state'] == state_str]
+    # state = state.drop(state[state['cases'] < 10].index) # not working
     county = state[state['county'] == county_str]
     train = state.drop(county.index)
     if response_var == 'cases':   # log scale for cases
@@ -139,7 +140,7 @@ def county_testing(df, state_str, county_str, n_test_days=10, response_var='case
 
 # Load datasets
 df = combine_datasets(write_csv=False)
-#X_train, X_test, y_train, y_test = state_testing(df,'Washington', 'King')
+#X_train, X_test, y_train, y_test = state_testing(df, 'Washington', 'Snohomish')
 X_train, X_test, y_train, y_test = county_testing(
     df, 'Washington', 'Snohomish', n_test_days=10)
 
@@ -181,11 +182,8 @@ print(f"Random forest error: {error}")
 # plot forests
 plot_prediction(X_test, y_test, y_pred, "Random Forest Regression")
 
-# feature selection with LASSO
-# Create and fit selector
-selector = SelectKBest(f_regression, k=8)
-selector.fit(X_train, y_train)
-# Get columns to keep and create new dataframe with those only
+# feature selection with linear estimator and cross validation
+selector = RFECV(LinearRegression()).fit(X_test, y_test)
 cols = selector.get_support(indices=True)
 features = X_train.iloc[:, cols]
 
