@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import glob
+
 plt.style.use('seaborn-whitegrid')
 import datetime
 
@@ -41,9 +42,9 @@ def combine_datasets(write_csv=False):
 
     # very fun
     df = pd.merge(covid, demo, how='left', left_on=['state_fips', 'county_fips', 'state', 'county'], right_on=[
-                  'state_fips', 'county_fips', 'state', 'county'])
+        'state_fips', 'county_fips', 'state', 'county'])
     df = pd.merge(df, pop, how='left', left_on=[
-                  'state', 'county', 'fips'], right_on=['state', 'county', 'fips'])
+        'state', 'county', 'fips'], right_on=['state', 'county', 'fips'])
 
     df.reset_index(drop=True, inplace=True)  # get rid of index column
     df.dropna(inplace=True)
@@ -74,7 +75,7 @@ def add_recurrent_cols(df, colnames, days_back):
         for i in range(days_back, len(idxs)):
             for col in colnames:
                 newcol = col + "-" + str(days_back)
-                pastval = df.loc[idxs[i-days_back], col]
+                pastval = df.loc[idxs[i - days_back], col]
                 df.loc[idxs[i], newcol] = pastval
 
     return df
@@ -86,21 +87,23 @@ def plot_prediction(X, y_test, y_pred, title):
     plt.xlabel("Day")
     plt.ylabel("Cases")
     days = [i for i in range(X.shape[0])]
-    plt.scatter(days, np.exp(y_test))
-    plt.plot(days, np.exp(y_pred), color='red')
+    plt.scatter(days, y_test)
+    plt.plot(days, y_pred, color='red')
     plt.show()
 
 
 # Ttying some simple models with data from one county
 df = combine_datasets(write_csv=False)
 print(df.county.mode, df.county_fips.mode)  # try county with most data points
-X = df[df['county'] == 'Snohomish'].sort_values(by='date')  # seattle county
+X = df[(df['county'] == 'Suffolk') & (df['state'] == 'Massachusetts')].sort_values(
+    by='date')  # need to filter by both state and county because there are duplicates
 
 # filter parameters
-X = X[['cases', 'cases_per_capita_100k', 'county_fips', 'new_day_cases_per_capita_100k', 'pop_per_sq_mile_2010', 'AGE_15TO24',
-       'AGE_25TO34', 'AGE_35TO44', 'AGE_45TO54', 'AGE_55TO64', 'AGE_65TO74', 'AGE_75TO84', 'AGE_84PLUS']]
+X = X[['cases', 'cases_per_capita_100k', 'county_fips', 'new_day_cases_per_capita_100k', 'pop_per_sq_mile_2010',
+       'AGE_15TO24',
+       'AGE_25TO34', 'AGE_35TO44', 'AGE_45TO54', 'AGE_55TO64', 'AGE_65TO74', 'AGE_75TO84', 'AGE_84PLUS', 'new_day_cases']]
 # log scale cases
-X[['cases']] = np.log(X[['cases']])
+# X[['cases']] = np.log(X[['cases']])
 
 # set up recurrent structure
 for i in range(1, 10):
@@ -108,10 +111,12 @@ for i in range(1, 10):
         X, ['cases'], i).dropna()
 recurr_params = [
     [f'cases-{x}'] for x in range(3, 8)]
+# params = ['pop_per_sq_mile_2010', 'AGE_15TO24',
+#           'AGE_25TO34', 'AGE_35TO44', 'AGE_45TO54', 'AGE_55TO64', 'AGE_65TO74', 'AGE_75TO84', 'AGE_84PLUS'] + \
+#     [item for sublist in recurr_params for item in sublist]
 params = ['pop_per_sq_mile_2010', 'AGE_15TO24',
-          'AGE_25TO34', 'AGE_35TO44', 'AGE_45TO54', 'AGE_55TO64', 'AGE_65TO74', 'AGE_75TO84', 'AGE_84PLUS'] + \
-    [item for sublist in recurr_params for item in sublist]
-
+          'AGE_25TO34', 'AGE_35TO44', 'AGE_45TO54', 'AGE_55TO64', 'AGE_65TO74', 'AGE_75TO84', 'AGE_84PLUS',
+          'cases-1', 'cases-4', 'cases-8']
 # sanity check
 map(lambda s: s.rstrip(), params)
 
@@ -121,65 +126,65 @@ X_test = X[params]
 y_train = X[['cases']].drop(X[params].tail(10).index).values.ravel()
 y_test = X[['cases']].values.ravel()
 
+
 # plot some points to see this data yo
-def plot_vars(title):
+def plot_county(title, metric):
     plt.title(title)
     plt.xlabel("Day")
-    plt.ylabel("Log Cases")
+    plt.ylabel("Cases")
     days = [i for i in range(X.shape[0])]
-    yvals = X[['cases']].values.ravel()
+    print(days)
+    yvals = X[[metric]].values.ravel()
     plt.scatter(days, yvals)
     plt.show()
 
+
+plot_county('New Cases per Day in Suffolk County MA', 'new_day_cases')
+
 # try linear regression on all
-lr = sm.OLS(y_train, sm.add_constant(X_train)).fit()
-y_pred = lr.predict(sm.add_constant(X_test))
-error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
-print(f"Linear error: {error}")
-
-print(lr.summary())
-
-# plot LR
-plot_prediction(X, y_test, y_pred, "Linear Regression")
-
-# lasso
-lasso = Lasso(alpha=1).fit(X_train, y_train)
-y_pred = lasso.predict(X_test)
-error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
-print(f"LASSO error: {error}")
-
-# plot lasso
-plot_prediction(X, y_test, y_pred, "Lasso Regression")
-
-# elastic net
-en = ElasticNet(alpha=1, random_state=0).fit(X_train, y_train)
-y_pred = en.predict(X_test.values)
-error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
-print(f"Elastic net error: {error}")
+# lr = sm.OLS(y_train, sm.add_constant(X_train)).fit()
+# y_pred = lr.predict(sm.add_constant(X_test))
+# error = mean_absolute_error(y_test, y_pred)
+# print(f"Linear error: {error}")
 #
-# plot elastic net
-plot_prediction(X, y_test, y_pred, "Elastic Net Regression")
-
-# random forests -- strange end behavior -- overfitting?
-forest = RandomForestRegressor(
-    n_estimators=25, random_state=0, n_jobs=-1, max_features='log2').fit(X_train, y_train)
-y_pred = forest.predict(X_test)
-error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
-print(f"Random forest error: {error}")
+# print(lr.summary())
 #
-# plot forests
-plot_prediction(X, y_test, y_pred, "Random Forest Regression")
+# # plot LR
+# # plot_prediction(X, y_test, y_pred, "Linear Regression")
+#
+# # lasso
+# lasso = Lasso(alpha=1).fit(X_train, y_train)
+# y_pred = lasso.predict(X_test)
+# error = mean_absolute_error(y_test, y_pred)
+# print(f"LASSO error: {error}")
+#
+# # plot lasso
+# plot_prediction(X, y_test, y_pred, "Lasso Regression")
+#
+# # elastic net
+# en = ElasticNet(alpha=1, random_state=0).fit(X_train, y_train)
+# y_pred = en.predict(X_test.values)
+# error = mean_absolute_error(y_test, y_pred)
+# print(f"Elastic net error: {error}")
+# #
+# # plot elastic net
+# plot_prediction(X, y_test, y_pred, "Elastic Net Regression")
+#
+# # random forests -- strange end behavior -- overfitting?
+# forest = RandomForestRegressor(
+#     n_estimators=25, random_state=0, n_jobs=-1, max_features='log2').fit(X_train, y_train)
+# y_pred = forest.predict(X_test)
+# error = mean_absolute_error(y_test, y_pred)
+# print(f"Random forest error: {error}")
+# #
+# # plot forests
+# plot_prediction(X, y_test, y_pred, "Random Forest Regression")
 
-# feature selection with LASSO  # TODO finish
+# # feature selection with LASSO  # TODO finish
 # sfm = SelectFromModel(Lasso(alpha=1), threshold=0.2)
 # sfm.fit(X_train, y_train)
 # n_features = sfm.transform(X_train).shape[1]
 # print(X_train)
-#
-# while n_features > 4:
-#     sfm.threshold += 0.1
-#     X_transform = sfm.transform(X_train)
-#     n_features = X_transform.shape[1]
-#     print(X_transform)
-#
-# print(X_transform)
+# #
+
+# selection for number of cases
