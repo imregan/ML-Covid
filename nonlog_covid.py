@@ -139,7 +139,7 @@ def plot_county(title, metric):
     plt.show()
 
 
-plot_county('New Cases per Day in Suffolk County MA', 'new_day_cases')
+plot_county('New Cases per Day in Suffolk County MA', 'ca')
 
 # try linear regression on all
 # lr = sm.OLS(y_train, sm.add_constant(X_train)).fit()
