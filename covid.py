@@ -6,12 +6,12 @@ import datetime
 
 from sklearn.linear_model import LinearRegression, Lasso, ElasticNet
 from sklearn.feature_selection import RFE, RFECV, SelectKBest, f_regression, SelectFromModel
-from sklearn.model_selection import KFold, cross_val_predict, GridSearchCV
+from sklearn.model_selection import KFold, cross_val_predict, GridSearchCV, TimeSeriesSplit
 from sklearn.decomposition import PCA
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor, ExtraTreesRegressor
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.svm import SVR
-from sklearn.metrics import r2_score, mean_absolute_error
+from sklearn.metrics import r2_score, mean_absolute_error, make_scorer
 from scipy.interpolate import CubicSpline
 import statsmodels.api as sm  # mostly for p values
 
@@ -125,7 +125,7 @@ def filter_columns(X):
 
 
 # set up testing for specific county with n test days
-def county_testing(df, state_str, county_str, n_test_days=10, response_var='cases', days_back_range=[3, 4, 5, 6, 7]):
+def county_testing(df, state_str, county_str, n_test_days=7, response_var='cases', days_back_range=[1, 2, 3, 6, 7]):
     state = df[df['state'] == state_str]
     county = state[state['county'] == county_str]
     if response_var == 'cases':
@@ -138,12 +138,52 @@ def county_testing(df, state_str, county_str, n_test_days=10, response_var='case
     return X_train, X_test, y_train, y_test
 
 
+# exp transform for real case error
+def mean_case_error(y, y_pred):
+    cases = np.exp(y)
+    pred = np.exp(y_pred)
+    return mean_absolute_error(cases, pred)
+
+
+# model parameter tuning
+def parameter_tuning(estimator, X, y, params, graph_title):
+    scorer = make_scorer(mean_case_error, greater_is_better=False)
+    grid = GridSearchCV(estimator, params,
+                        cv=TimeSeriesSplit(n_splits=5), scoring=scorer, n_jobs=-1).fit(X, y)
+    print(f"Best estimator for model {graph_title}: \n {grid.best_estimator_}")
+    grid_results = grid.cv_results_
+    mean_score = grid_results['mean_test_score']
+
+    if len(params) == 1:  # lasso
+        key = list(params.keys())[0]
+        plt.plot(params[key], mean_score)
+        plt.xlabel(key)
+        plt.ylabel('Mean Absolute Error (Cases)')
+        plt.title(graph_title)
+        plt.show()
+
+    else:
+        key1, key2 = list(params.keys())[0], list(params.keys())[1]
+        params1, params2, = params[key1], params[key2]
+        mean_score = np.array(mean_score).reshape(len(params2), len(params1))
+        for idx, val in enumerate(params2):
+            plt.plot(params1, mean_score[idx, :],
+                     label=key2 + ": " + str(val))
+            plt.xlabel(key1)
+            plt.ylabel('Mean Absolute Error (Cases)')
+            plt.legend(loc='best')
+            plt.title(graph_title)
+            plt.show()
+
+
 # Load datasets
 df = combine_datasets(write_csv=False)
-#X_train, X_test, y_train, y_test = state_testing(df, 'Washington', 'Snohomish')
+# X_train, X_test, y_train, y_test = state_testing(df, 'Washington', 'Snohomish')
 X_train, X_test, y_train, y_test = county_testing(
-    df, 'Washington', 'Snohomish', n_test_days=10)
+    df, 'Washington', 'Snohomish', n_test_days=1)
 
+final_params = ['cases-1', 'cases-7']
+# X_train, X_test = X_train[final_params], X_test[final_params]
 
 # try linear regression on all
 lr = LinearRegression().fit(X_train, y_train)
@@ -155,7 +195,10 @@ print(f"Linear error: {error}")
 plot_prediction(X_test, y_test, y_pred, "Linear Regression")
 
 # lasso
-lasso = Lasso(alpha=1, max_iter=50000).fit(X_train, y_train)
+params = {'alpha': np.linspace(0, 1, 101)}
+# parameter_tuning(Lasso(max_iter=50000, random_state=0),
+#                 X_train, y_train, params, "Lasso CV")
+lasso = Lasso(alpha=0.2, max_iter=5000, random_state=0).fit(X_train, y_train)
 y_pred = lasso.predict(X_test)
 error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
 print(f"LASSO error: {error}")
@@ -164,7 +207,13 @@ print(f"LASSO error: {error}")
 plot_prediction(X_test, y_test, y_pred, "Lasso Regression")
 
 # elastic net
-en = ElasticNet(alpha=1, max_iter=50000, random_state=0).fit(X_train, y_train)
+# params = {'alpha': np.linspace(0, 1, 101), 'l1_ratio': np.linspace(0, 1, 11)} # real testing
+# params = {'alpha': np.linspace(0, 1, 101), 'l1_ratio': [
+#    0.1, 0.5, 0.9]}  # easier to graph
+# parameter_tuning(ElasticNet(max_iter=50000, random_state=0), X_train,
+#                 y_train, params, "Elastic Net CV")
+en = ElasticNet(alpha=0.02, l1_ratio=0.1, max_iter=500000,
+                random_state=0).fit(X_train, y_train)
 y_pred = en.predict(X_test.values)
 error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
 print(f"Elastic net error: {error}")
@@ -173,8 +222,12 @@ print(f"Elastic net error: {error}")
 plot_prediction(X_test, y_test, y_pred, "Elastic Net Regression")
 
 # random forests -- strange end behavior -- overfitting?
+# params = {'ccp_alpha': np.linspace(0, 1, 101), 'max_features': [
+#    'auto', 'sqrt']}
+# parameter_tuning(RandomForestRegressor(), X_train,
+#                 y_train, params, "Random Forests")
 forest = RandomForestRegressor(
-    n_estimators=50, random_state=0, n_jobs=-1).fit(X_train, y_train)
+    n_estimators=100, random_state=0, n_jobs=-1).fit(X_train, y_train)
 y_pred = forest.predict(X_test)
 error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
 print(f"Random forest error: {error}")
@@ -187,4 +240,4 @@ selector = RFECV(LinearRegression()).fit(X_test, y_test)
 cols = selector.get_support(indices=True)
 features = X_train.iloc[:, cols]
 
-print(features.head())
+print(features.head())  # should show that cases-1 and cases-7 are the best
