@@ -10,6 +10,7 @@ from sklearn.feature_selection import RFE, RFECV, SelectKBest, f_regression, Sel
 from sklearn.model_selection import KFold, cross_val_predict, GridSearchCV
 from sklearn.decomposition import PCA
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor, ExtraTreesRegressor
+from sklearn.tree import DecisionTreeRegressor
 from sklearn.svm import SVR
 from sklearn.metrics import r2_score, mean_absolute_error
 from scipy.interpolate import CubicSpline
@@ -76,8 +77,18 @@ def add_recurrent_cols(df, colnames, days_back):
                 newcol = col + "-" + str(days_back)
                 pastval = df.loc[idxs[i-days_back], col]
                 df.loc[idxs[i], newcol] = pastval
-
     return df
+
+
+# place recurrent variables
+def place_recurrent_variables(X, response_var='cases', days_back_range=[3, 4, 5, 6, 7]):
+    for lag in days_back_range:
+        X = add_recurrent_cols(X, [response_var], lag).dropna()
+    recurr_params = [[f'{response_var}-{x}'] for x in days_back_range]
+    params = ['pop_per_sq_mile_2010', 'cases', 'AGE_15TO24',
+              'AGE_25TO34', 'AGE_35TO44', 'AGE_45TO54', 'AGE_55TO64', 'AGE_65TO74', 'AGE_75TO84', 'AGE_84PLUS'] + \
+        [item for sublist in recurr_params for item in sublist]
+    return X[params]
 
 
 # plot predictions for models below
@@ -91,84 +102,84 @@ def plot_prediction(X, y_test, y_pred, title):
     plt.show()
 
 
-# Ttying some simple models with data from one county
+# set up testing for state for training, county for testing
+def state_testing(df, state_str, county_str, response_var='cases', days_back_range=[3, 4, 5, 6, 7]):
+    state = df[df['state'] == state_str]
+    # state = state.drop(state[state['cases'] < 10].index) # not working
+    county = state[state['county'] == county_str]
+    train = state.drop(county.index)
+    if response_var == 'cases':   # log scale for cases
+        train[['cases']], county[['cases']] = np.log(
+            train[['cases']]), np.log(county[['cases']])
+    train = place_recurrent_variables(train, response_var, days_back_range)
+    test = place_recurrent_variables(county, response_var, days_back_range)
+    X_train, X_test, y_train, y_test = train.drop([response_var], axis=1), test.drop(
+        [response_var], axis=1), train[[response_var]], test[[response_var]]
+    return X_train, X_test, y_train, y_test
+
+
+# filter out unimportant predictors (not really used anymore)
+def filter_columns(X):
+    X = X[['pop_per_sq_mile_2010', 'AGE_15TO24',
+           'AGE_25TO34', 'AGE_35TO44', 'AGE_45TO54', 'AGE_55TO64', 'AGE_65TO74', 'AGE_75TO84', 'AGE_84PLUS']]
+    return X
+
+
+# set up testing for specific county with n test days
+def county_testing(df, state_str, county_str, n_test_days=10, response_var='cases', days_back_range=[3, 4, 5, 6, 7]):
+    state = df[df['state'] == state_str]
+    county = state[state['county'] == county_str]
+    if response_var == 'cases':
+        county[response_var] = np.log(county[response_var])
+    data = place_recurrent_variables(county, response_var, days_back_range)
+    X = data.drop([response_var], axis=1)
+    y = data[[response_var]]
+    X_train, X_test, y_train, y_test = X.drop(
+        X.tail(n_test_days).index), X, y.drop(y.tail(n_test_days).index).values.ravel(), y.values.ravel()
+    return X_train, X_test, y_train, y_test
+
+
+# Load datasets
 df = combine_datasets(write_csv=False)
-print(df.county.mode, df.county_fips.mode)  # try county with most data points
-X = df[df['county'] == 'Snohomish'].sort_values(by='date')  # seattle county
-
-# filter parameters
-X = X[['cases', 'cases_per_capita_100k', 'county_fips', 'new_day_cases_per_capita_100k', 'pop_per_sq_mile_2010', 'AGE_15TO24',
-       'AGE_25TO34', 'AGE_35TO44', 'AGE_45TO54', 'AGE_55TO64', 'AGE_65TO74', 'AGE_75TO84', 'AGE_84PLUS']]
-# log scale cases
-X[['cases']] = np.log(X[['cases']])
-
-# set up recurrent structure
-for i in range(1, 10):
-    X = add_recurrent_cols(
-        X, ['cases'], i).dropna()
-recurr_params = [
-    [f'cases-{x}'] for x in range(3, 8)]
-params = ['pop_per_sq_mile_2010', 'AGE_15TO24',
-          'AGE_25TO34', 'AGE_35TO44', 'AGE_45TO54', 'AGE_55TO64', 'AGE_65TO74', 'AGE_75TO84', 'AGE_84PLUS'] + \
-    [item for sublist in recurr_params for item in sublist]
-
-# sanity check
-map(lambda s: s.rstrip(), params)
-
-# set up response/predictors (testing by removing last 10 days of data)
-X_train = X[params].drop(X[params].tail(10).index)
-X_test = X[params]
-y_train = X[['cases']].drop(X[params].tail(10).index).values.ravel()
-y_test = X[['cases']].values.ravel()
-
-# plot some points to see this data yo
-def plot_vars(title):
-    plt.title(title)
-    plt.xlabel("Day")
-    plt.ylabel("Log Cases")
-    days = [i for i in range(X.shape[0])]
-    yvals = X[['cases']].values.ravel()
-    plt.scatter(days, yvals)
-    plt.show()
+#X_train, X_test, y_train, y_test = state_testing(df, 'Washington', 'Snohomish')
+X_train, X_test, y_train, y_test = county_testing(
+    df, 'Washington', 'Snohomish', n_test_days=10)
 
 # try linear regression on all
-lr = sm.OLS(y_train, sm.add_constant(X_train)).fit()
-y_pred = lr.predict(sm.add_constant(X_test))
+lr = LinearRegression().fit(X_train, y_train)
+y_pred = lr.predict(X_test)
 error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
 print(f"Linear error: {error}")
 
-print(lr.summary())
-
 # plot LR
-plot_prediction(X, y_test, y_pred, "Linear Regression")
+plot_prediction(X_test, y_test, y_pred, "Linear Regression")
 
 # lasso
-lasso = Lasso(alpha=1).fit(X_train, y_train)
+lasso = Lasso(alpha=1, max_iter=50000).fit(X_train, y_train)
 y_pred = lasso.predict(X_test)
 error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
 print(f"LASSO error: {error}")
 
 # plot lasso
-plot_prediction(X, y_test, y_pred, "Lasso Regression")
+plot_prediction(X_test, y_test, y_pred, "Lasso Regression")
 
 # elastic net
-en = ElasticNet(alpha=1, random_state=0).fit(X_train, y_train)
+en = ElasticNet(alpha=1, max_iter=50000, random_state=0).fit(X_train, y_train)
 y_pred = en.predict(X_test.values)
 error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
 print(f"Elastic net error: {error}")
 #
 # plot elastic net
-plot_prediction(X, y_test, y_pred, "Elastic Net Regression")
+plot_prediction(X_test, y_test, y_pred, "Elastic Net Regression")
 
 # random forests -- strange end behavior -- overfitting?
 forest = RandomForestRegressor(
-    n_estimators=25, random_state=0, n_jobs=-1, max_features='log2').fit(X_train, y_train)
+    n_estimators=50, random_state=0, n_jobs=-1).fit(X_train, y_train)
 y_pred = forest.predict(X_test)
 error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
 print(f"Random forest error: {error}")
 #
 # plot forests
-plot_prediction(X, y_test, y_pred, "Random Forest Regression")
 
 # feature selection with LASSO  # TODO finish
 # sfm = SelectFromModel(Lasso(alpha=1), threshold=0.2)
@@ -183,3 +194,12 @@ plot_prediction(X, y_test, y_pred, "Random Forest Regression")
 #     print(X_transform)
 #
 # print(X_transform)
+
+plot_prediction(X_test, y_test, y_pred, "Random Forest Regression")
+
+# feature selection with linear estimator and cross validation
+selector = RFECV(LinearRegression()).fit(X_test, y_test)
+cols = selector.get_support(indices=True)
+features = X_train.iloc[:, cols]
+
+print(features.head())
