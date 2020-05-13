@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 import glob
 import datetime
 
@@ -16,28 +17,14 @@ from scipy.interpolate import CubicSpline
 import statsmodels.api as sm  # mostly for p values
 
 
-# Alternative option to NY enriched
-def johns_hopkins_us_daily_reports():
-    files = glob.glob("data/csse_daily_reports*.csv")
-    li = []
-    for filename in files:
-        df = pd.read_csv(filename, index_col=None, header=0)
-        li.append(df)
-
-    frame = pd.concat(li, axis=0, ignore_index=True)
-    frame.drop(['Lat', 'Long_', 'ISO3', 'UID', 'FIPS',
-                'Country_Region'], axis=1, inplace=True)
-    return frame
-
-
 # join datasets on covid, demographics, and population
 def combine_datasets(write_csv=False):
     # put together csv files5
-    covid = pd.read_csv("enricheddata/covid19_us_county.csv")
-    demo = pd.read_csv("enricheddata/us_county_demographics.csv")
+    covid = pd.read_csv('enricheddata/covid19_us_county.csv')
+    demo = pd.read_csv('enricheddata/us_county_demographics.csv')
     demo['county'] = demo['county'].apply(lambda x: x.rsplit(
         ' ', 1)[0])  # remove 'County' from string for join
-    pop = pd.read_csv("enricheddata/us_county_pop_and_shps.csv")
+    pop = pd.read_csv('enricheddata/us_county_pop_and_shps.csv')
 
     # very fun
     df = pd.merge(covid, demo, how='left', left_on=['state_fips', 'county_fips', 'state', 'county'], right_on=[
@@ -49,7 +36,7 @@ def combine_datasets(write_csv=False):
     df.dropna(inplace=True)
 
     if write_csv:
-        df.to_csv("covid_enriched.csv")
+        df.to_csv('covid_enriched.csv')
 
     return df
 
@@ -60,7 +47,7 @@ def add_recurrent_cols(df, colnames, days_back):
     # add recurrent variables
     # initialize columns
     for col in colnames:
-        newcol = col + "-" + str(days_back)
+        newcol = col + '-' + str(days_back)
         df[newcol] = np.zeros_like(df[col])
 
     # fill in recurrent info by county
@@ -73,7 +60,7 @@ def add_recurrent_cols(df, colnames, days_back):
         # this actually works now I think
         for i in range(days_back, len(idxs)):
             for col in colnames:
-                newcol = col + "-" + str(days_back)
+                newcol = col + '-' + str(days_back)
                 pastval = df.loc[idxs[i-days_back], col]
                 df.loc[idxs[i], newcol] = pastval
     return df
@@ -93,10 +80,10 @@ def place_recurrent_variables(X, response_var='cases', days_back_range=[3, 4, 5,
 # plot predictions for models below
 def plot_prediction(X, y_test, y_pred, title):
     plt.title(title)
-    plt.xlabel("Day")
-    plt.ylabel("Cases")
+    plt.xlabel('Day')
+    plt.ylabel('Cases')
     days = [i for i in range(X.shape[0])]
-    plt.scatter(days, np.exp(y_test))
+    plt.scatter(days, np.exp(y_test), s=20, alpha=0.7)
     plt.plot(days, np.exp(y_pred), color='red')
     plt.show()
 
@@ -122,6 +109,38 @@ def filter_columns(X):
     X = X[['pop_per_sq_mile_2010', 'AGE_15TO24',
            'AGE_25TO34', 'AGE_35TO44', 'AGE_45TO54', 'AGE_55TO64', 'AGE_65TO74', 'AGE_75TO84', 'AGE_84PLUS']]
     return X
+
+
+# diagnostic plot
+def resid_fitted_plot(X, y, graph_title):
+    model = sm.OLS(y, sm.add_constant(X)).fit()
+    # model values
+    model_fitted_y = model.fittedvalues
+    # model residuals
+    model_residuals = model.resid
+    # normalized residuals
+    model_norm_residuals = model.get_influence().resid_studentized_internal
+    # absolute squared normalized residuals
+    model_norm_residuals_abs_sqrt = np.sqrt(np.abs(model_norm_residuals))
+    # absolute residuals
+    model_abs_resid = np.abs(model_residuals)
+    # leverage, from statsmodels internals
+    model_leverage = model.get_influence().hat_matrix_diag
+    # cook's distance, from statsmodels internals
+    model_cooks = model.get_influence().cooks_distance[0]
+
+    plot_lm_1 = plt.figure()
+    plot_lm_1.axes[0] = sns.residplot(model_fitted_y, y,
+                                      lowess=True,
+                                      scatter_kws={'alpha': 0.5},
+                                      line_kws={'color': 'red', 'lw': 1, 'alpha': 0.8})
+
+    plot_lm_1.axes[0].set_title('Residuals vs Fitted')
+    plot_lm_1.axes[0].set_xlabel('Fitted values')
+    plot_lm_1.axes[0].set_ylabel('Residuals')
+
+    plt.title(graph_title)
+    plt.show()
 
 
 # set up testing for specific county with n test days
@@ -150,7 +169,7 @@ def parameter_tuning(estimator, X, y, params, graph_title):
     scorer = make_scorer(mean_case_error, greater_is_better=False)
     grid = GridSearchCV(estimator, params,
                         cv=TimeSeriesSplit(n_splits=5), scoring=scorer, n_jobs=-1).fit(X, y)
-    print(f"Best estimator for model {graph_title}: \n {grid.best_estimator_}")
+    print(f'Best estimator for model {graph_title}: \n {grid.best_estimator_}')
     grid_results = grid.cv_results_
     mean_score = grid_results['mean_test_score']
 
@@ -168,7 +187,7 @@ def parameter_tuning(estimator, X, y, params, graph_title):
         mean_score = np.array(mean_score).reshape(len(params2), len(params1))
         for idx, val in enumerate(params2):
             plt.plot(params1, mean_score[idx, :],
-                     label=key2 + ": " + str(val))
+                     label=key2 + ': ' + str(val))
             plt.xlabel(key1)
             plt.ylabel('Mean Absolute Error (Cases)')
             plt.legend(loc='best')
@@ -183,61 +202,92 @@ X_train, X_test, y_train, y_test = county_testing(
     df, 'Washington', 'Snohomish', n_test_days=1)
 
 final_params = ['cases-1', 'cases-7']
-# X_train, X_test = X_train[final_params], X_test[final_params]
+X_train, X_test = X_train[final_params], X_test[final_params]
+
+
+# resid_fitted_plot(X_train, y_train, 'fitted residuals cases-17')  # plot residuals for current params
 
 # try linear regression on all
 lr = LinearRegression().fit(X_train, y_train)
 y_pred = lr.predict(X_test)
-error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
-print(f"Linear error: {error}")
+error = mean_absolute_error(
+    np.exp(y_test), np.exp(y_pred))  # mean absolute error
+day_pred_error = np.exp(y_pred[-1]) - np.exp(y_test[-1])
+print(f'Day prediction error {day_pred_error}, Percent Error {100*(day_pred_error/np.exp(y_test[-1]))}')
+print(f'Mean Linear error: {error}')
 
 # plot LR
-plot_prediction(X_test, y_test, y_pred, "Linear Regression")
+plot_prediction(X_test, y_test, y_pred, 'Linear Regression - Snohomish')
 
 # lasso
-params = {'alpha': np.linspace(0, 1, 101)}
+#params = {'alpha': np.linspace(0, 1, 101)}
 # parameter_tuning(Lasso(max_iter=50000, random_state=0),
-#                 X_train, y_train, params, "Lasso CV")
-lasso = Lasso(alpha=0.2, max_iter=5000, random_state=0).fit(X_train, y_train)
+#                 X_train, y_train, params, 'Lasso CV')
+lasso = Lasso(alpha=0.2, max_iter=50000, random_state=0).fit(X_train, y_train)
 y_pred = lasso.predict(X_test)
+day_pred_error = np.exp(y_test[-1]) - np.exp(y_pred[-1])
 error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
-print(f"LASSO error: {error}")
+print(f'Day prediction error {day_pred_error}, Percent Error {100*(day_pred_error/np.exp(y_test[-1]))}')
+print(f'LASSO mean error: {error}')
 
 # plot lasso
-plot_prediction(X_test, y_test, y_pred, "Lasso Regression")
+plot_prediction(X_test, y_test, y_pred, 'Lasso Regression - Snohomish')
 
 # elastic net
 # params = {'alpha': np.linspace(0, 1, 101), 'l1_ratio': np.linspace(0, 1, 11)} # real testing
 # params = {'alpha': np.linspace(0, 1, 101), 'l1_ratio': [
 #    0.1, 0.5, 0.9]}  # easier to graph
 # parameter_tuning(ElasticNet(max_iter=50000, random_state=0), X_train,
-#                 y_train, params, "Elastic Net CV")
+#                 y_train, params, 'Elastic Net CV')
+en = ElasticNet(alpha=0.02, l1_ratio=0.1, max_iter=50000,
+                random_state=0).fit(X_train, y_train)
+y_pred = en.predict(X_test.values)
+error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
+day_pred_error = np.exp(y_test[-1]) - np.exp(y_pred[-1])
+print(f'Day prediction error {day_pred_error}, Percent Error {100*(day_pred_error/np.exp(y_test[-1]))}')
+print(f'LASSO mean error: {error}')
+
+# plot lasso
+plot_prediction(X_test, y_test, y_pred, 'Lasso Regression - Snohomish')
+
+# elastic net
+# params = {'alpha': np.linspace(0, 1, 101), 'l1_ratio': np.linspace(0, 1, 11)} # real testing
+# params = {'alpha': np.linspace(0, 1, 101), 'l1_ratio': [
+#    0.1, 0.5, 0.9]}  # easier to graph
+# parameter_tuning(ElasticNet(max_iter=50000, random_state=0), X_train,
+#                 y_train, params, 'Elastic Net CV')
 en = ElasticNet(alpha=0.02, l1_ratio=0.1, max_iter=500000,
                 random_state=0).fit(X_train, y_train)
 y_pred = en.predict(X_test.values)
 error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
-print(f"Elastic net error: {error}")
+day_pred_error = np.exp(y_test[-1]) - np.exp(y_pred[-1])
+print(f'Day prediction error {day_pred_error}, Percent Error {100*(day_pred_error/np.exp(y_test[-1]))}')
+print(f'Elastic net mean error: {error}')
 
 # plot elastic net
-plot_prediction(X_test, y_test, y_pred, "Elastic Net Regression")
+plot_prediction(X_test, y_test, y_pred, 'Elastic Net Regression - Snohomish')
 
 # random forests -- strange end behavior -- overfitting?
-# params = {'ccp_alpha': np.linspace(0, 1, 101), 'max_features': [
-#    'auto', 'sqrt']}
-# parameter_tuning(RandomForestRegressor(), X_train,
-#                 y_train, params, "Random Forests")
+# params = {'n_estimators': [i for i in range(
+#    10, 501, 5)], 'max_features': ['auto', 'sqrt']}
+# parameter_tuning(RandomForestRegressor(criterion='mae'), X_train,
+#                 y_train, params, 'Random Forests')
 forest = RandomForestRegressor(
-    n_estimators=100, random_state=0, n_jobs=-1).fit(X_train, y_train)
+    n_estimators=10, random_state=0, n_jobs=-1).fit(X_train, y_train)
 y_pred = forest.predict(X_test)
 error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
-print(f"Random forest error: {error}")
+day_pred_error = np.exp(y_test[-1]) - np.exp(y_pred[-1])
+print(f'Day prediction error {day_pred_error}, Percent Error {100*(day_pred_error/np.exp(y_test[-1]))}')
+print(f'Random forest mean error: {error}')
 
 # plot forests
-plot_prediction(X_test, y_test, y_pred, "Random Forest Regression")
+plot_prediction(X_test, y_test, y_pred, 'Random Forest Regression - Snohomish')
 
 # feature selection with linear estimator and cross validation
-selector = RFECV(LinearRegression()).fit(X_test, y_test)
+selector = RFECV(LinearRegression(), cv=TimeSeriesSplit(
+    n_splits=5)).fit(X_test, y_test)
 cols = selector.get_support(indices=True)
 features = X_train.iloc[:, cols]
 
-print(features.head())  # should show that cases-1 and cases-7 are the best
+# should show that cases-1 and cases-7 are the best
+print(f'Chosen Features on Snohomish Dataset: {features.columns}')
