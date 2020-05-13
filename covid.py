@@ -120,14 +120,6 @@ def resid_fitted_plot(X, y, graph_title):
     model_residuals = model.resid
     # normalized residuals
     model_norm_residuals = model.get_influence().resid_studentized_internal
-    # absolute squared normalized residuals
-    model_norm_residuals_abs_sqrt = np.sqrt(np.abs(model_norm_residuals))
-    # absolute residuals
-    model_abs_resid = np.abs(model_residuals)
-    # leverage, from statsmodels internals
-    model_leverage = model.get_influence().hat_matrix_diag
-    # cook's distance, from statsmodels internals
-    model_cooks = model.get_influence().cooks_distance[0]
 
     plot_lm_1 = plt.figure()
     plot_lm_1.axes[0] = sns.residplot(model_fitted_y, y,
@@ -201,6 +193,7 @@ df = combine_datasets(write_csv=False)
 X_train, X_test, y_train, y_test = county_testing(
     df, 'Washington', 'Snohomish', n_test_days=1)
 
+# comment out to give all params
 final_params = ['cases-1', 'cases-7']
 X_train, X_test = X_train[final_params], X_test[final_params]
 
@@ -227,23 +220,6 @@ lasso = Lasso(alpha=0.2, max_iter=50000, random_state=0).fit(X_train, y_train)
 y_pred = lasso.predict(X_test)
 day_pred_error = np.exp(y_test[-1]) - np.exp(y_pred[-1])
 error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
-print(f'Day prediction error {day_pred_error}, Percent Error {100*(day_pred_error/np.exp(y_test[-1]))}')
-print(f'LASSO mean error: {error}')
-
-# plot lasso
-plot_prediction(X_test, y_test, y_pred, 'Lasso Regression - Snohomish')
-
-# elastic net
-# params = {'alpha': np.linspace(0, 1, 101), 'l1_ratio': np.linspace(0, 1, 11)} # real testing
-# params = {'alpha': np.linspace(0, 1, 101), 'l1_ratio': [
-#    0.1, 0.5, 0.9]}  # easier to graph
-# parameter_tuning(ElasticNet(max_iter=50000, random_state=0), X_train,
-#                 y_train, params, 'Elastic Net CV')
-en = ElasticNet(alpha=0.02, l1_ratio=0.1, max_iter=50000,
-                random_state=0).fit(X_train, y_train)
-y_pred = en.predict(X_test.values)
-error = mean_absolute_error(np.exp(y_test), np.exp(y_pred))
-day_pred_error = np.exp(y_test[-1]) - np.exp(y_pred[-1])
 print(f'Day prediction error {day_pred_error}, Percent Error {100*(day_pred_error/np.exp(y_test[-1]))}')
 print(f'LASSO mean error: {error}')
 
@@ -283,11 +259,20 @@ print(f'Random forest mean error: {error}')
 # plot forests
 plot_prediction(X_test, y_test, y_pred, 'Random Forest Regression - Snohomish')
 
-# feature selection with linear estimator and cross validation
+# feature selection with LinearRegression and cross validation
 selector = RFECV(LinearRegression(), cv=TimeSeriesSplit(
     n_splits=5)).fit(X_test, y_test)
 cols = selector.get_support(indices=True)
 features = X_train.iloc[:, cols]
 
-# should show that cases-1 and cases-7 are the best
+# cases-1 and cases-7 on snohomish
 print(f'Chosen Features on Snohomish Dataset: {features.columns}')
+
+# # repeat with Elastic Net as a sanity check
+# selector = RFECV(ElasticNet(), cv=TimeSeriesSplit(
+#     n_splits=5)).fit(X_test, y_test)
+# cols = selector.get_support(indices=True)
+# features = X_train.iloc[:, cols]
+
+# # should show that cases-1 and cases-7 are the best
+# print(f'Chosen Features on Snohomish Dataset: {features.columns}')
