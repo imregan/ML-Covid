@@ -103,7 +103,7 @@ X = X[['cases', 'cases_per_capita_100k', 'county_fips', 'new_day_cases_per_capit
        'AGE_15TO24',
        'AGE_25TO34', 'AGE_35TO44', 'AGE_45TO54', 'AGE_55TO64', 'AGE_65TO74', 'AGE_75TO84', 'AGE_84PLUS', 'new_day_cases']]
 # log scale cases
-# X[['cases']] = np.log(X[['cases']])
+X[['cases']] = np.log(X[['cases']])
 
 # set up recurrent structure
 for i in range(1, 10):
@@ -131,7 +131,7 @@ y_test = X[['cases']].values.ravel()
 def plot_county(title, metric):
     plt.title(title)
     plt.xlabel("Day")
-    plt.ylabel("Cases")
+    plt.ylabel("Log Cases")
     days = [i for i in range(X.shape[0])]
     print(days)
     yvals = X[[metric]].values.ravel()
@@ -139,7 +139,7 @@ def plot_county(title, metric):
     plt.show()
 
 
-plot_county('New Cases per Day in Suffolk County MA', 'ca')
+plot_county('New Cases per Day in Suffolk County MA', 'cases')
 
 # try linear regression on all
 # lr = sm.OLS(y_train, sm.add_constant(X_train)).fit()
