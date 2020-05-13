@@ -14,7 +14,6 @@ from sklearn.tree import DecisionTreeRegressor
 from sklearn.svm import SVR
 from sklearn.metrics import r2_score, mean_absolute_error, make_scorer
 from scipy.interpolate import CubicSpline
-import statsmodels.api as sm  # mostly for p values
 
 
 # join datasets on covid, demographics, and population
@@ -104,22 +103,11 @@ def state_testing(df, state_str, county_str, response_var='cases', days_back_ran
     return X_train, X_test, y_train, y_test
 
 
-# filter out unimportant predictors (not really used anymore)
-def filter_columns(X):
-    X = X[['pop_per_sq_mile_2010', 'AGE_15TO24',
-           'AGE_25TO34', 'AGE_35TO44', 'AGE_45TO54', 'AGE_55TO64', 'AGE_65TO74', 'AGE_75TO84', 'AGE_84PLUS']]
-    return X
-
-
 # diagnostic plot
 def resid_fitted_plot(X, y, graph_title):
     model = sm.OLS(y, sm.add_constant(X)).fit()
     # model values
     model_fitted_y = model.fittedvalues
-    # model residuals
-    model_residuals = model.resid
-    # normalized residuals
-    model_norm_residuals = model.get_influence().resid_studentized_internal
 
     plot_lm_1 = plt.figure()
     plot_lm_1.axes[0] = sns.residplot(model_fitted_y, y,
@@ -132,6 +120,18 @@ def resid_fitted_plot(X, y, graph_title):
     plot_lm_1.axes[0].set_ylabel('Residuals')
 
     plt.title(graph_title)
+    plt.show()
+
+
+# initial data viz
+def plot_county(X, title, metric):
+    plt.title(title)
+    plt.xlabel("Day")
+    plt.ylabel("Cases")
+    days = [i for i in range(X.shape[0])]
+    print(days)
+    yvals = X[[metric]].values.ravel()
+    plt.scatter(days, yvals)
     plt.show()
 
 
