@@ -3,17 +3,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import glob
-import datetime
 
 from sklearn.linear_model import LinearRegression, Lasso, ElasticNet
-from sklearn.feature_selection import RFE, RFECV, SelectKBest, f_regression, SelectFromModel
-from sklearn.model_selection import KFold, cross_val_predict, GridSearchCV, TimeSeriesSplit
+from sklearn.feature_selection import RFECV
+from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 from sklearn.decomposition import PCA
-from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor, ExtraTreesRegressor
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.svm import SVR
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import r2_score, mean_absolute_error, make_scorer
 from scipy.interpolate import CubicSpline
+
+import statsmodels.api as sm  # for extra OLS metrics
 
 
 # join datasets on covid, demographics, and population
